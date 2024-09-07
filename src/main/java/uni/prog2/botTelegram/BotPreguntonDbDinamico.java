@@ -7,8 +7,13 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMa
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import uni.prog2.botConfig.BotConfiguracion;
-import uni.prog2.dao.PreguntaDao;
+import uni.prog2.model.Cuestionario;
 import uni.prog2.model.Pregunta;
+import uni.prog2.model.Respuesta;
+import uni.prog2.service.CuestionarioService;
+import uni.prog2.service.PreguntaService;
+import uni.prog2.service.RespuestaService;
+
 
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -16,9 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-
-
-public class botPregunton extends TelegramLongPollingBot {
+public class BotPreguntonDbDinamico extends TelegramLongPollingBot {
     private final Map<Long, Integer> indicePregunta = new HashMap<>();
     private final Map<Long, String> seccionActiva = new HashMap<>();
     private final Map<String, String[]> preguntas = new HashMap<>();
@@ -26,7 +29,7 @@ public class botPregunton extends TelegramLongPollingBot {
 
     @Override
     public String getBotUsername() {
-       return BotConfiguracion.getBotUsername();
+        return BotConfiguracion.getBotUsername();
     }
 
     @Override
@@ -36,12 +39,27 @@ public class botPregunton extends TelegramLongPollingBot {
 
 
 
-    public botPregunton() {
-        // Inicializa los cuestionarios con las preguntas.
-        preguntas.put("SECTION_1", new String[]{"🤦‍♂️1.1- Estas aburrido?", "😂😂 1.2- Te bañaste hoy?", "🤡🤡 Pregunta 1.3"});
-        preguntas.put("SECTION_2", new String[]{"Pregunta 2.1", "2.2- ", "Pregunta 2.3"});
-        preguntas.put("SECTION_3", new String[]{"Pregunta 3.1", "Pregunta 3.2", "Pregunta 3.3"});
-        preguntas.put("SECTION_4", new String[]{"4.1- A que te Dedicas", "4.2- Cual Es tu Edad?", "4.3- Te gustaron las Preguntas?"});
+    public BotPreguntonDbDinamico() throws SQLException {
+        //obtener todos los cuestionarios en una lista
+        List<Cuestionario> cuestionarios = new CuestionarioService().getAllCuestionarios();
+
+        //iterar sobre la lista de cuestionarios e insertarlos en preguntas
+        for (Cuestionario cuestionario : cuestionarios) {
+
+            //getPreguntasByCuestionarioId
+            List<Pregunta> TodasPreguntas = new PreguntaService().getPreguntasByCuestionarioId(cuestionario.getId());
+            String[] arrayPreguntas = new String[TodasPreguntas.size()];
+            for (int i = 0; i < TodasPreguntas.size(); i++) {
+                arrayPreguntas[i] = TodasPreguntas.get(i).getPreguntaTexto();
+            }
+
+            preguntas.put("SECTION_" + cuestionario.getId(), arrayPreguntas);
+            //con programacion funcional
+             preguntas.put("SECTION_" + cuestionario.getId(), TodasPreguntas.stream().map(Pregunta::getPreguntaTexto).toArray(String[]::new));
+
+        }
+
+
     }
 
     @Override
@@ -50,14 +68,14 @@ public class botPregunton extends TelegramLongPollingBot {
             String messageText = actualizacion.getMessage().getText();
             long chatId = actualizacion.getMessage().getChatId();
 
+
+
+
             if (messageText.equals("/menu")) {
+                //sendMenuRespuesta(chatId);
                 sendMenu(chatId);
             } else if (seccionActiva.containsKey(chatId)) {
-                try {
-                    manejaCuestionario(chatId, messageText);
-                } catch (SQLException e) {
-                    throw new RuntimeException(e);
-                }
+                manejaCuestionario(chatId, messageText);
             }
         } else if (actualizacion.hasCallbackQuery()) { //es una respusta de un boton
             String callbackData = actualizacion.getCallbackQuery().getData();
@@ -66,22 +84,36 @@ public class botPregunton extends TelegramLongPollingBot {
         }
     }
 
-
-
-
     private void sendMenu(long chatId) {
         SendMessage message = new SendMessage();
         message.setChatId(chatId);
         message.setText("Selecciona una sección:");
 
+
+
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
 
+
+
+//carga de cuestionarios
+
+        List<Cuestionario> cuestionarios = new CuestionarioService().getAllCuestionarios();
+
+//iterar sobre la lista de cuestionarios e insertarlos en preguntas
+        for (Cuestionario cuestionario : cuestionarios) {
+            rows.add(crearFilaBoton(cuestionario.getNombre(), "SECTION_" + cuestionario.getId()));
+        }
+
+
+
+
+
         // Crea los botones del menú
-        rows.add(crearFilaBoton("Sección 1", "SECTION_1"));
-        rows.add(crearFilaBoton("Sección 2", "SECTION_2"));
-        rows.add(crearFilaBoton("Sección 3", "SECTION_3"));
-        rows.add(crearFilaBoton("Sección 4", "SECTION_4"));
+//        rows.add(crearFilaBoton("Sección 1", "SECTION_1"));
+//        rows.add(crearFilaBoton("Sección 2", "SECTION_2"));
+//        rows.add(crearFilaBoton("Sección 3", "SECTION_3"));
+//        rows.add(crearFilaBoton("Sección 4", "SECTION_4"));
 
         markup.setKeyboard(rows);
         message.setReplyMarkup(markup);
@@ -106,7 +138,6 @@ public class botPregunton extends TelegramLongPollingBot {
         seccionActiva.put(chatId, section);
         indicePregunta.put(chatId, 0);
         enviarPregunta(chatId);
-
     }
 
     private void enviarPregunta(long chatId) {
@@ -116,9 +147,6 @@ public class botPregunton extends TelegramLongPollingBot {
 
         if (index < questions.length) {
             sendText(chatId, questions[index]);
-
-
-
         } else {
             sendText(chatId, "¡Has completado el cuestionario!");
             seccionActiva.remove(chatId);
@@ -126,19 +154,50 @@ public class botPregunton extends TelegramLongPollingBot {
         }
     }
 
-    private void manejaCuestionario(long chatId, String response) throws SQLException {
+
+    //esta es la función que podemos almacenar las respuestas y controlar qué responde el usuario
+    private void manejaCuestionario(long chatId, String response) {
+        Respuesta resp = new Respuesta();
+
         String section = seccionActiva.get(chatId);
         int index = indicePregunta.get(chatId);
 
-        sendText(chatId, "Tu respuesta fue: " + response);
+        if (section.contains("SECTION_4") && index == 1) {
+            sendText(chatId, "Respusta de Edad analizando.... ");
 
-        PreguntaDao preguntaDao = new PreguntaDao();
+            int edad;
+            try {
+                edad = Integer.parseInt(response);
+            } catch (NumberFormatException e) {
+                sendText(chatId, "La edad ingresada no es válida. Por favor, ingresa un número.");
+                return;
+            }
+
+
+            //evaluar si la edad está en un rango valido para una persona y que sea un número
+            if (edad < 0 || edad > 120) {
+                sendText(chatId, "La edad ingresada no es válida. Por favor, ingresa un número entre 0 y 120.");
+                return;
+            }
+        }
+
+        resp.setRespuestaTexto(response);
+        resp.setTelegramId(chatId);
+        resp.setSeccion(seccionActiva.get(chatId));
+        resp.setPreguntaId(indicePregunta.get(chatId));
+        new RespuestaService().saveRespuesta(resp);
+        sendText(chatId, "Datos Guardados Exitosamente " + response);
 
         indicePregunta.put(chatId, index + 1);
 
         enviarPregunta(chatId);
     }
-    public void sendText(Long chatId, String text) {
+
+
+
+
+
+    private void sendText(Long chatId, String text) {
         SendMessage message = SendMessage.builder()
                 .chatId(chatId.toString())
                 .text(text)
